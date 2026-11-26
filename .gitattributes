@@ -1,0 +1,2 @@
+# 所有文本文件在工作区里都用 LF 换行，避免 Windows 的 CRLF 让 Prettier / Ruff 检查失败
+* text=auto eol=lf

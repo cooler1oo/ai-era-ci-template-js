@@ -1,0 +1,38 @@
+# ② 开 PR 时：先查规矩，再只跑和这次改动相关的测试。要快。
+name: PR 快检查
+
+on:
+  pull_request:
+
+jobs:
+  fast:
+    # 攒批的 PR（batch/N）走「批次重检查」，这里跳过；两种做法可以并存
+    if: ${{ !startsWith(github.head_ref, 'batch/') }}
+    runs-on: ubuntu-latest
+    # 限时 5 分钟（建议值，可以调）。超时说明测试太慢：去优化测试，或者挪到 ③，不要加机器。
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 要完整历史，才能算出这次改了哪些文件
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: 规则检查（和 ① 一样，防止有人跳过本地钩子）
+        run: npm run lint --if-present
+      - name: 只跑和这次改动相关的测试
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          # 改了依赖、配置或 CI，影响面说不清：跑全部快测试
+          if git diff --name-only "$BASE...HEAD" | grep -qE '(^|/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig[^/]*\.json|(vite|vitest|jest)\.config\.[^/]+)$|^\.github/'; then
+            npx vitest run --exclude '**/*.slow.test.*' --exclude '**/node_modules/**'
+            exit $?
+          fi
+          files=$(git diff --name-only --diff-filter=d "$BASE...HEAD" -- '*.js' '*.jsx' '*.ts' '*.tsx' '*.mjs' '*.cjs' '*.vue' '*.svelte')
+          if [ -z "$files" ]; then echo "这次没改代码文件，跳过"; exit 0; fi
+          # Jest 换成：npx jest --findRelatedTests $files --passWithNoTests --testPathIgnorePatterns '\.slow\.test\.'
+          # shellcheck disable=SC2086 # $files 要按空格拆成多个参数
+          npx vitest related --run --passWithNoTests --exclude '**/*.slow.test.*' --exclude '**/node_modules/**' $files
